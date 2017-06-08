@@ -1,27 +1,35 @@
 package pgy;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 import org.tvheadend.tvhclient.htsp.HTSConnection;
 import org.tvheadend.tvhclient.htsp.HTSConnectionListener;
 import org.tvheadend.tvhclient.htsp.HTSMessage;
+import org.tvheadend.tvhclient.htsp.HTSResponseHandler;
 import org.tvheadend.tvhclient.model.Channel;
+import org.tvheadend.tvhclient.model.ChannelTag;
 
 public class HtsClient {
 	private List<Channel> channels = new ArrayList<>();
 	private HTSConnection connection;
 	private Executor execService;
 	private boolean initialSyncCompleted;
+	private Map<Object, ChannelTag> tags = new HashMap<>();
 
 	public interface InitialSyncCompletedListener {
 		public void execute();
 	}
 
-	public HTSConnection open(String hostname, int port, String username, String password,
-			InitialSyncCompletedListener initialSyncCompletedListener) {
+	public interface OnGetTicketListener {
+		public void execute(String url);
+	}
+
+	public HTSConnection open(String hostname, int port, String username, String password, InitialSyncCompletedListener initialSyncCompletedListener) {
 		connection = new HTSConnection(new HTSConnectionListener() {
 
 			@Override
@@ -30,12 +38,12 @@ public class HtsClient {
 				System.out.println("onMessage " + method);
 				if (method.equals("channelAdd")) {
 					onChannelAdd(response);
-				}
-				if (method.equals("initialSyncCompleted")) {
-					initialSyncCompleted = true;
-					if (initialSyncCompletedListener != null) {
-						initialSyncCompletedListener.execute();
-					}
+				} else if (method.equals("tagAdd")) {
+					onTagAdd(response);
+				} else if (method.equals("tagUpdate")) {
+					onTagUpdate(response);
+				} else if (method.equals("initialSyncCompleted")) {
+					onInitialSyncCompleted(initialSyncCompletedListener);
 				}
 			}
 
@@ -74,6 +82,55 @@ public class HtsClient {
 			ch.number = (int) (ch.id + 25000);
 		}
 		channels.add(ch);
+	}
+
+	private void onTagAdd(HTSMessage msg) {
+		ChannelTag tag = new ChannelTag();
+		tag.id = msg.getLong("tagId");
+		tag.name = msg.getString("tagName", null);
+		tag.icon = msg.getString("tagIcon", null);
+		tags.put(tag.id, tag);
+	}
+
+	private void onTagUpdate(HTSMessage msg) {
+		ChannelTag tag = tags.get(msg.getLong("tagId"));
+		if (tag == null) {
+			return;
+		}
+
+		tag.name = msg.getString("tagName", tag.name);
+		String icon = msg.getString("tagIcon", tag.icon);
+		if (icon == null) {
+			tag.icon = null;
+			tag.iconBitmap = null;
+		} else if (!icon.equals(tag.icon)) {
+			tag.icon = icon;
+		}
+	}
+
+	public void getTicket(Channel ch, OnGetTicketListener onGetTicketListener) {
+		HTSMessage request = new HTSMessage();
+		request.setMethod("getTicket");
+		request.putField("channelId", ch.id);
+		connection.sendMessage(request, new HTSResponseHandler() {
+
+			public void handleResponse(HTSMessage response) {
+				String path = response.getString("path", null);
+				String ticket = response.getString("ticket", null);
+				String webroot = connection.getWebRoot();
+				String url = webroot + path + "?ticket=" + ticket;
+				if (onGetTicketListener != null) {
+					onGetTicketListener.execute(url);
+				}
+			}
+		});
+	}
+
+	private void onInitialSyncCompleted(InitialSyncCompletedListener initialSyncCompletedListener) {
+		initialSyncCompleted = true;
+		if (initialSyncCompletedListener != null) {
+			initialSyncCompletedListener.execute();
+		}
 	}
 
 	public void close() {
