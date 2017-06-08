@@ -12,7 +12,7 @@ public class Test {
 		final CountDownLatch latch = new CountDownLatch(1);
 		
 		htsClient = new HtsClient();
-		htsClient.open("pgy.no-ip.hu", 80, "andris", "pender123", () -> {
+		htsClient.open("pgy.no-ip.hu", 80, "andris", "", () -> {
 			printChannels(htsClient);
 			latch.countDown();
 		});
